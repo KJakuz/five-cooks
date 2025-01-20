@@ -1,14 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <pthread.h>
 #include <stdbool.h>
 
 #define NUM_COOKS 5
-#define TABLE_CAPACITY 5
 #define MAX_WEIGHT 20
 #define MAX_PORTION_WEIGHT MAX_WEIGHT/NUM_COOKS
 
@@ -68,8 +66,6 @@ void consume_portion(int cook_id, int weight) {
 void *cook(void *arg) {
     int cook_id = *(int *)arg;
     struct portion elem;
-    int portions_prepared = 0;
-    int portions_consumed = 0;
     
     while (1) {
         bool should_cook = (rand() % 2) == 0;
@@ -88,7 +84,6 @@ void *cook(void *arg) {
                     exit(1);
                 }
                 table_weight += portion_weight;
-                portions_prepared++;
                 printf("Cook %d placed a portion of weight %d on the table. Current weight: %d\n", 
                        cook_id, portion_weight, table_weight);
             } else {
@@ -97,29 +92,29 @@ void *cook(void *arg) {
             pthread_mutex_unlock(&table_lock);
             putdown_forks(cook_id);
         } else {
+            pickup_forks(cook_id);
             pthread_mutex_lock(&table_lock);
             if (table_weight > 0) {
                 if (msgrcv(table_msgid, &elem, sizeof(elem.weight), PELNY, IPC_NOWAIT) != -1 && elem.weight > 0) {
                     table_weight -= elem.weight;
+                    
                     printf("Cook %d took a portion of weight %d. Current weight: %d\n", 
                            cook_id, elem.weight, table_weight);
                     pthread_mutex_unlock(&table_lock);
-                    
-                    pickup_forks(cook_id);
                     consume_portion(cook_id, elem.weight);
                     putdown_forks(cook_id);
                     
-                    portions_consumed++;
                 } else {
                     pthread_mutex_unlock(&table_lock);
                     printf("Cook %d couldn't receive a portion.\n", cook_id);
+                    putdown_forks(cook_id);
                 }
             } else {
                 pthread_mutex_unlock(&table_lock);
                 printf("Cook %d found no portions to consume.\n", cook_id);
+                putdown_forks(cook_id);
             }
         }
-        
         sleep(1);
     }
     return NULL;

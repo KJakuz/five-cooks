@@ -85,8 +85,6 @@ void *cook(void *arg) {
     int cook_id = *(int *)arg; //id kucharza(arg) ktore jest void zamieniamy na zmienna int
     
     struct portion elem;
-    int portions_prepared = 0;
-    int portions_consumed = 0;
     
     while (1) {
         //czy przygotowac procje czy skonsumowac
@@ -108,7 +106,6 @@ void *cook(void *arg) {
                     exit(1);
                 }
                 table_weight += portion_weight;
-                portions_prepared++;
                 printf("Cook %d placed a portion of weight %d on the table. Current weight: %d\n",cook_id, portion_weight, table_weight);
             } else {
                 printf("Cook %d couldn't place a portion due to weight limit.\n", cook_id);
@@ -119,28 +116,29 @@ void *cook(void *arg) {
 
         // konsumpcja porcji    
         } else {
-            pthread_mutex_lock(&table_lock);  //blokujemy stół mutexem, żeby inny watek nie wtracil czegos
-            if (table_weight > 0) { //sprawdzenie czy jakakolwiek porcja na stole
-                //proces konsumpcji -> bierzemy porcje, bierzemy widelce, jemy porcje, odkladamy widelce
-                if (msgrcv(table_msgid, &elem, sizeof(elem.weight), PELNY, IPC_NOWAIT) != -1 && elem.weight > 0) { //odbior komunikatu z kolejki
-                    table_weight -= elem.weight; 
-                    printf("Cook %d took a portion of weight %d. Current weight: %d\n", cook_id, elem.weight, table_weight); 
-                    
-                    pthread_mutex_unlock(&table_lock);
-                    pickup_forks(cook_id);
-                    consume_portion(cook_id, elem.weight);
-                    putdown_forks(cook_id);
-                    
-                    portions_consumed++;
-                } else {
-                    pthread_mutex_unlock(&table_lock);
-                    printf("Cook %d couldn't receive a portion.\n", cook_id);
-                }
-            } else {
-                pthread_mutex_unlock(&table_lock);
-                printf("Cook %d found no portions to consume.\n", cook_id);
-            }
+    pickup_forks(cook_id);  // Najpierw zajmujemy widelce
+    
+    pthread_mutex_lock(&table_lock);  // Blokujemy stół
+    if (table_weight > 0) { // Sprawdzenie czy jakakolwiek porcja na stole
+        if (msgrcv(table_msgid, &elem, sizeof(elem.weight), PELNY, IPC_NOWAIT) != -1 && elem.weight > 0) {
+            table_weight -= elem.weight; 
+            printf("Cook %d took a portion of weight %d. Current weight: %d\n", cook_id, elem.weight, table_weight); 
+            
+            pthread_mutex_unlock(&table_lock);
+            consume_portion(cook_id, elem.weight);
+            putdown_forks(cook_id);
+            
+        } else {
+            pthread_mutex_unlock(&table_lock);
+            putdown_forks(cook_id);  // Pamiętamy o odłożeniu widelców w przypadku błędu
+            printf("Cook %d couldn't receive a portion.\n", cook_id);
         }
+    } else {
+        pthread_mutex_unlock(&table_lock);
+        putdown_forks(cook_id);  // Pamiętamy o odłożeniu widelców gdy nie ma porcji
+        printf("Cook %d found no portions to consume.\n", cook_id);
+    }
+}
         
         sleep(1);
     }
